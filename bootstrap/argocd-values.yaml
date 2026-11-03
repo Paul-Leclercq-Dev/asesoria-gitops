@@ -1,0 +1,63 @@
+# Valeurs du chart Helm d'Argo CD.
+# Utilisées DEUX fois, avec la même version de chart :
+#   1. par bootstrap/install.sh, pour la toute première installation (Helm) ;
+#   2. par clusters/demo/argocd.yaml : ensuite, Argo CD se gère lui-même depuis Git.
+# Changer une valeur ici = une PR ; Argo CD l'applique après le merge.
+
+global:
+  # Argo CD n'est PAS exposé sur Internet : on y accède par
+  # `kubectl port-forward` (voir docs/bootstrap.fr.md), d'où cette adresse locale.
+  domain: localhost:8080
+
+configs:
+  cm:
+    admin.enabled: true
+    exec.enabled: false          # pas de terminal dans les pods depuis l'interface
+    statusbadge.enabled: false
+    users.anonymous.enabled: false
+    # « App-of-apps » : l'application racine crée d'autres Applications, dans
+    # l'ordre des vagues (sync-wave). Pour qu'Argo CD attende qu'une vague soit
+    # « Healthy » avant la suivante, il doit savoir calculer la santé d'une
+    # Application (désactivé par défaut depuis Argo CD 1.8). Script tiré de la
+    # documentation d'Argo CD (« Sync Waves and app of apps »).
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil then
+        if obj.status.health ~= nil then
+          hs.status = obj.status.health.status
+          if obj.status.health.message ~= nil then
+            hs.message = obj.status.health.message
+          end
+        end
+      end
+      return hs
+
+# Composants inutiles ici : connexion SSO (Dex) et notifications.
+dex:
+  enabled: false
+notifications:
+  enabled: false
+
+# Un seul nœud de 8 Go : on réserve peu, on plafonne la mémoire.
+controller:
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits: { memory: 1Gi }
+repoServer:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+server:
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { memory: 256Mi }
+applicationSet:
+  resources:
+    requests: { cpu: 10m, memory: 48Mi }
+    limits: { memory: 128Mi }
+redis:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }

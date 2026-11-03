@@ -1,0 +1,48 @@
+# cert-manager : obtient et renouvelle les certificats TLS (Let's Encrypt).
+# Sa configuration (émetteurs, jeton Cloudflare) est dans cert-manager-config.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.21.3
+    helm:
+      releaseName: cert-manager
+      valuesObject:
+        crds:
+          enabled: true
+          keep: true # désinstaller le chart ne supprime pas les certificats existants
+        # Vérification de la propagation DNS (défi DNS-01) auprès de résolveurs
+        # publics plutôt que ceux de l'hébergeur : plus fiable avec Cloudflare.
+        dns01RecursiveNameservers: "1.1.1.1:53,1.0.0.1:53"
+        dns01RecursiveNameserversOnly: true
+        startupapicheck:
+          enabled: false # tâche de vérification Helm, inutile sous Argo CD
+        prometheus:
+          enabled: false # métriques : phase 6
+        resources:
+          requests: { cpu: 10m, memory: 64Mi }
+          limits: { memory: 256Mi }
+        webhook:
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+        cainjector:
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { memory: 256Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

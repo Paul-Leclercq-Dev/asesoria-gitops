@@ -1,0 +1,36 @@
+# Argo CD se gère lui-même : installé une fois par Helm (bootstrap/install.sh),
+# il reprend ensuite la main sur ses propres ressources. Monter de version =
+# changer `targetRevision` ici (une PR), rien d'autre.
+# La version est lue aussi par bootstrap/install.sh : une seule source de vérité.
+# Dernière vague : la reprise en main d'Argo CD par lui-même ne doit jamais
+# bloquer l'installation du reste de la plateforme.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: 10.11.6 # Argo CD v3.5.6
+      helm:
+        releaseName: argocd # le même nom que l'installation Helm initiale
+        valueFiles:
+          - $values/bootstrap/argocd-values.yaml
+    # Deuxième source : ce dépôt, seulement pour y lire le fichier de valeurs.
+    - repoURL: https://github.com/Paul-Leclercq-Dev/asesoria-gitops.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: false # prudence : jamais de suppression automatique dans Argo CD lui-même
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true # CRD trop grosses pour l'application « côté client »

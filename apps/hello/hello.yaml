@@ -1,0 +1,87 @@
+# Page de test « whoami » : renvoie les en-têtes de la requête reçue.
+# Utile pour voir ce que Cloudflare transmet (CF-Connecting-IP, X-Forwarded-*).
+# TEMPORAIRE : supprimée en 4.2b, quand le CRM prend app.tramelya.es.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+  labels: { app.kubernetes.io/name: hello }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: hello }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: hello }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.12.0
+          args: ["--port", "8080", "--name", "tramelya-demo"]
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 5m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 32Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello
+spec:
+  selector: { app.kubernetes.io/name: hello }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+# Certificat Let's Encrypt de app.tramelya.es, rangé dans le secret
+# app-tramelya-es-tls (sauvegardable avec bootstrap/tls-backup.sh).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: app-tramelya-es
+spec:
+  secretName: app-tramelya-es-tls
+  dnsNames: [app.tramelya.es]
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+---
+# Traefik (fourni par k3s) reçoit le trafic HTTPS de Cloudflare sur le 443
+# et le dirige vers le service « hello » avec le certificat ci-dessus.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [app.tramelya.es]
+      secretName: app-tramelya-es-tls
+  rules:
+    - host: app.tramelya.es
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hello
+                port: { name: http }

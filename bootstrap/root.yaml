@@ -1,0 +1,25 @@
+# Application racine (« app-of-apps »). C'est la SEULE ressource Argo CD
+# appliquée à la main (par bootstrap/install.sh). Elle lit le dossier
+# clusters/demo/ dans Git, qui contient une Application par composant ;
+# Argo CD installe ensuite chaque composant, dans l'ordre des vagues.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Paul-Leclercq-Dev/asesoria-gitops.git
+    targetRevision: main
+    path: clusters/demo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true     # une Application retirée de Git est retirée du cluster
+      selfHeal: true  # une modification faite à la main est annulée
+    retry:
+      limit: 10
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }

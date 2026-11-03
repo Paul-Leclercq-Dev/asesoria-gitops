@@ -1,0 +1,34 @@
+# MODÈLE (jamais appliqué tel quel : Argo CD ignore l'extension .example).
+# Pour créer le vrai fichier, depuis la racine du dépôt (docs/bootstrap.fr.md, étape 3) :
+#   cp platform/cert-manager-config/cloudflare-api-token.sops.yaml.example \
+#      platform/cert-manager-config/cloudflare-api-token.sops.yaml
+#   (remplacer la valeur ci-dessous par le jeton Cloudflare)
+#   sops encrypt --in-place platform/cert-manager-config/cloudflare-api-token.sops.yaml
+#   grep -c 'ENC\[' platform/cert-manager-config/cloudflare-api-token.sops.yaml   # doit afficher au moins 1
+# Jeton : Cloudflare → My Profile → API Tokens → Create Token → Custom :
+#   Zone · DNS · Edit  +  Zone · Zone · Read, limité à la zone tramelya.es.
+apiVersion: isindir.github.com/v1alpha3
+kind: SopsSecret
+metadata:
+    name: cloudflare-api-token
+    namespace: cert-manager
+spec:
+    secretTemplates:
+        - name: cloudflare-api-token
+          stringData:
+            api-token: ENC[AES256_GCM,data:e8Z8/H7UK+59NLmNojjbcrj7Ss78/fGH4p3ZvWMq9w02PPwCeTPbR0hJZ46YrOuYzzi4ehk=,iv:PyJLp2UbODJaDfoBQ61WBnDD0n9Vvb4n1A+9/3Pt7Mw=,tag:eCIAH57OK3lM5QPFy69hGw==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBrQlRQTk1DSzUrdlkyblRE
+            S05Kck01ZlBwY3lNTjN3aFNLdnd5MnFtaERrCjQxYXJHMUY2dGdnci85NTJFZGtr
+            bWVLYllPUUVWYVlEMVd6eEROeVlvTVEKLS0tIG02UmMvYkRXaVF4cGcyYU5tUFRy
+            TUdQSHJXRlB5bjdsYlZOY3JTU0x0czAKPYIKPmjjDxdAXOsagyXutInpvwFwCnsm
+            fjAjLvldPik8Olt/0KbcdiGgNOqK7KHbuvCZlKtcFV7A2tX/NotSOA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age16ejn70gtxx30nasdcx8rszz7p202gzlk577y5anu776xzd9ujalq9vmvdj
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-03T15:32:33Z"
+    mac: ENC[AES256_GCM,data:q9EqJSgGfC2Ij66WOYKHdS5jiPkWdZLLqooyZhPVmeiB3MHqDBmccqY8ClTzRmdBI+cc371t/H6zzFEUQjA5k6aPjkne63W9mZW6TBmEGi3JGnDCSCmAXRqjV/JPitEfSCOXP78nOXHp2+IIsaWGN/mImQyKfCmzru691Rheoug=,iv:CtlYLn/Cs29C8/EKl22Ve1qXxH18B0vqJFiQ/RqUNPU=,tag:+q4sdWq6B+8Y1x1lYbsUXg==,type:str]
+    version: 3.13.3

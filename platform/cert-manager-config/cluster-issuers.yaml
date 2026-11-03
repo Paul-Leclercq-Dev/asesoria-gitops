@@ -1,0 +1,47 @@
+# Deux « émetteurs » Let's Encrypt, valables pour tout le cluster.
+# Défi DNS-01 : cert-manager prouve qu'on contrôle tramelya.es en créant un
+# enregistrement TXT temporaire chez Cloudflare (jeton : cloudflare-api-token).
+# Le port 80 étant fermé (et l'origine cachée derrière Cloudflare), le défi
+# HTTP-01 est impossible : DNS-01 est le seul choix.
+#
+# - letsencrypt-staging : certificats NON reconnus par les navigateurs, mais
+#   limites très larges. Pour tester sans risque (SSL Cloudflare en « full »).
+# - letsencrypt-prod : vrais certificats ; 5 certificats identiques max par
+#   7 jours (voir docs/bootstrap.fr.md, « Limite Let's Encrypt »).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: contact@tramelya.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - selector:
+          dnsZones: [tramelya.es]
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: contact@tramelya.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - selector:
+          dnsZones: [tramelya.es]
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token

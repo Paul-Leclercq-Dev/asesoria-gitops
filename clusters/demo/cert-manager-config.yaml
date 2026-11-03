@@ -1,0 +1,26 @@
+# Configuration de cert-manager : émetteurs Let's Encrypt + jeton Cloudflare
+# (chiffré SOPS). Vague 1 : il faut que cert-manager et l'opérateur SOPS
+# (vague 0) soient prêts, sinon leurs types de ressources n'existent pas encore.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Paul-Leclercq-Dev/asesoria-gitops.git
+    targetRevision: main
+    path: platform/cert-manager-config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 10
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }

@@ -1,0 +1,10 @@
+# Dependabot ne sait pas lire les versions de charts dans les Applications
+# Argo CD : elles sont montées à la main (voir README, « Mettre à jour »).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

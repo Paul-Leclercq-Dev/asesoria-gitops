@@ -1,0 +1,12 @@
+# Clés et secrets EN CLAIR : jamais dans ce dépôt public.
+*.agekey
+keys.txt
+*.dec.yaml
+*.plain.yaml
+*.kubeconfig
+kubeconfig*
+.env
+.env.*
+# Archives de livraison (extraites puis commitées)
+.backup/
+.DS_Store

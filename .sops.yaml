@@ -1,0 +1,11 @@
+# Règles de chiffrement SOPS de ce dépôt (lues par `sops encrypt`).
+# - Seuls les fichiers *.sops.yaml sont concernés.
+# - Seules les valeurs sous `data` / `stringData` sont chiffrées : le reste
+#   (nom, espace de noms) reste lisible dans Git et dans les revues de PR.
+# - Destinataire : la clé PUBLIQUE age de Paul (publique = sans risque ici).
+#   La clé privée correspondante vit dans son gestionnaire de mots de passe
+#   et, sur le cluster, dans le secret sops/sops-age-key-file.
+creation_rules:
+  - path_regex: \.sops\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age: age16ejn70gtxx30nasdcx8rszz7p202gzlk577y5anu776xzd9ujalq9vmvdj

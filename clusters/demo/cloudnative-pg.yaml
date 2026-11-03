@@ -1,0 +1,30 @@
+# Opérateur CloudNativePG : sait créer et exploiter des clusters PostgreSQL
+# décrits en YAML (ressource « Cluster »). Ici, seulement l'opérateur ; la base
+# du CRM arrive en 4.2b.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudnative-pg
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://cloudnative-pg.github.io/charts
+    chart: cloudnative-pg
+    targetRevision: 0.29.1 # opérateur CloudNativePG 1.30.1
+    helm:
+      releaseName: cnpg
+      valuesObject:
+        resources:
+          requests: { cpu: 25m, memory: 96Mi }
+          limits: { memory: 256Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true # ses CRD dépassent la taille d'une annotation

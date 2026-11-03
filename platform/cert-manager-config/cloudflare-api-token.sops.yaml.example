@@ -1,0 +1,19 @@
+# MODÈLE (jamais appliqué tel quel : Argo CD ignore l'extension .example).
+# Pour créer le vrai fichier, depuis la racine du dépôt (docs/bootstrap.fr.md, étape 3) :
+#   cp platform/cert-manager-config/cloudflare-api-token.sops.yaml.example \
+#      platform/cert-manager-config/cloudflare-api-token.sops.yaml
+#   (remplacer la valeur ci-dessous par le jeton Cloudflare)
+#   sops encrypt --in-place platform/cert-manager-config/cloudflare-api-token.sops.yaml
+#   grep -c 'ENC\[' platform/cert-manager-config/cloudflare-api-token.sops.yaml   # doit afficher au moins 1
+# Jeton : Cloudflare → My Profile → API Tokens → Create Token → Custom :
+#   Zone · DNS · Edit  +  Zone · Zone · Read, limité à la zone tramelya.es.
+apiVersion: isindir.github.com/v1alpha3
+kind: SopsSecret
+metadata:
+  name: cloudflare-api-token
+  namespace: cert-manager
+spec:
+  secretTemplates:
+    - name: cloudflare-api-token
+      stringData:
+        api-token: COLLER_ICI_LE_JETON_CLOUDFLARE
