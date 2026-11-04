@@ -20,6 +20,9 @@ spec:
     automated:
       prune: true     # une Application retirée de Git est retirée du cluster
       selfHeal: true  # une modification faite à la main est annulée
+    # Sur un cluster neuf, la vague 1 peut mettre plusieurs minutes à devenir
+    # « Healthy » (compte Let's Encrypt, premier déchiffrement SOPS). Avec 10
+    # essais, root abandonnait avant (vécu le 2026-11-03). 30 essais ≈ 75 min.
     retry:
-      limit: 10
+      limit: 30
       backoff: { duration: 10s, factor: 2, maxDuration: 3m }
