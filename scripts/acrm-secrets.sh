@@ -43,7 +43,7 @@ if [ -z "${S3_ACCESS_KEY_ID:-}" ] || [ -z "${S3_SECRET_ACCESS_KEY:-}" ]; then
     || die "terraform output impossible : .env de envs/demo-data chargé ? apply fait ?"
   S3_SECRET_ACCESS_KEY="$(terraform -chdir="$INFRA_DIR" output -raw documents_secret_access_key)"
 fi
-[ -n "$S3_ACCESS_KEY_ID" ] && [ -n "$S3_SECRET_ACCESS_KEY" ] || die "clés S3 vides"
+if [ -z "$S3_ACCESS_KEY_ID" ] || [ -z "$S3_SECRET_ACCESS_KEY" ]; then die "clés S3 vides"; fi
 
 : "${GHCR_USER:?GHCR_USER manquant (ton identifiant GitHub, ex. export GHCR_USER=Paul-Leclercq-Dev)}"
 if [ -z "${GHCR_TOKEN:-}" ]; then
