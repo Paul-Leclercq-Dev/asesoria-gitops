@@ -1,0 +1,67 @@
+# API NestJS (image acrm-api, `node dist/main.js`), rôle PostgreSQL acrm_app.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "api") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "acrm.selector" (dict "root" $ "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acrm.selector" (dict "root" $ "component" "api") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- include "acrm.podSecurity" (dict "root" $) | nindent 6 }}
+      containers:
+        - name: api
+          image: {{ include "acrm.image" (dict "root" $ "name" "acrm-api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "acrm.envFrom" . | nindent 10 }}
+          env:
+            {{- include "acrm.dbEnv" (dict "root" $ "secret" .Values.secrets.dbApp "user" "acrm_app" "var" "DATABASE_URL") | nindent 12 }}
+            {{- include "acrm.redisEnv" . | nindent 12 }}
+            - { name: PORT, value: "3000" }
+            - name: JWT_ACCESS_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secrets.api }}, key: JWT_ACCESS_SECRET }
+          ports:
+            - { name: http, containerPort: 3000 }
+          # startup : laisse le temps à Nest de démarrer ; readiness : base + Redis
+          # joignables (sinon plus de trafic) ; liveness : le processus répond.
+          startupProbe:
+            httpGet: { path: /v1/health/live, port: http }
+            periodSeconds: 3
+            failureThreshold: 40
+          readinessProbe:
+            httpGet: { path: /v1/health/ready, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /v1/health/live, port: http }
+            periodSeconds: 20
+          {{- include "acrm.containerSecurity" (dict "uid" 1000) | nindent 10 }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        {{- include "acrm.tmpVolume" . | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "api") | nindent 4 }}
+spec:
+  selector:
+    {{- include "acrm.selector" (dict "root" $ "component" "api") | nindent 4 }}
+  ports:
+    - { name: http, port: 3000, targetPort: http }

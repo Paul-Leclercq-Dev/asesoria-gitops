@@ -1,0 +1,58 @@
+{{- if .Values.postgres.enabled }}
+# Base PostgreSQL décrite en YAML : l'opérateur CloudNativePG crée le pod, le
+# volume, les services <nom>-rw / -ro et les rôles, puis les maintient.
+# - acrm_admin : propriétaire de la base et du schéma (migrations uniquement) ;
+# - acrm_app   : rôle de l'API, soumis à la RLS (jamais propriétaire, jamais BYPASSRLS) ;
+# - acrm_worker: hérite de acrm_app + lit la liste des cabinets (policy dédiée).
+# Les migrations font des GRANT vers acrm_app et acrm_worker : ces rôles doivent
+# exister AVANT (le Job de migration les attend).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.postgres.clusterName }}
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "database") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  instances: 1                 # un seul nœud : pas de réplique (démo)
+  imageName: {{ .Values.postgres.image }}
+  enableSuperuserAccess: false
+  storage:
+    size: {{ .Values.postgres.storageSize }}   # classe par défaut de k3s (local-path, disque du nœud)
+  resources:
+    {{- toYaml .Values.postgres.resources | nindent 4 }}
+  postgresql:
+    parameters:
+      timezone: UTC            # l'API calcule les dates dans le fuseau de chaque cabinet
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.database }}
+      owner: acrm_admin
+      secret: { name: {{ .Values.secrets.dbAdmin }} }
+      encoding: UTF8
+      # Même tri que la CI et le poste de dev (image Debian, en_US.UTF-8).
+      localeCollate: en_US.UTF-8
+      localeCType: en_US.UTF-8
+  managed:
+    roles:
+      - name: acrm_app
+        ensure: present
+        login: true
+        inherit: true
+        superuser: false
+        createdb: false
+        createrole: false
+        bypassrls: false
+        passwordSecret: { name: {{ .Values.secrets.dbApp }} }
+      - name: acrm_worker
+        ensure: present
+        login: true
+        inherit: true
+        superuser: false
+        createdb: false
+        createrole: false
+        bypassrls: false
+        inRoles: [acrm_app]
+        passwordSecret: { name: {{ .Values.secrets.dbWorker }} }
+{{- end }}

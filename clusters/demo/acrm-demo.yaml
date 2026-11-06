@@ -1,0 +1,56 @@
+# Le CRM (Expedita) sur https://app.tramelya.es (phase 4.2b). Remplace la page de
+# test « hello » de 4.2a : même espace de noms, même certificat.
+# Deux sources :
+#   1. le chart charts/acrm, avec les valeurs de la démo ci-dessous ;
+#   2. apps/acrm-demo/ : les secrets chiffrés SOPS (générés par scripts/acrm-secrets.sh).
+# Ordre dans l'Application : secrets (-1) → base, Redis, Mailpit, certificat (0)
+# → migrations (1) → API, worker, front, Ingress (2) → données de démo (après).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: acrm-demo
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  # Retirer cette Application de Git supprime aussi ses ressources (base comprise).
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/Paul-Leclercq-Dev/asesoria-gitops.git
+      targetRevision: main
+      path: charts/acrm
+      helm:
+        releaseName: acrm
+        valuesObject:
+          host: app.tramelya.es
+          image:
+            # Version du CRM déployée : changer ce numéro (PR) = déployer une version.
+            tag: "0.2.0"
+          config:
+            MAIL_FROM: "Expedita (démo) <no-reply@tramelya.es>"
+          s3:
+            # Sorties de asesoria-infra/envs/demo-data (terraform output).
+            endpoint: https://s3.gra.io.cloud.ovh.net
+            region: gra
+            bucket: tramelya-demo-documents
+          seed:
+            enabled: true
+            scale: 3
+    - repoURL: https://github.com/Paul-Leclercq-Dev/asesoria-gitops.git
+      targetRevision: main
+      path: apps/acrm-demo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: acrm-demo
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true
+    # Premier démarrage : la base et le premier téléchargement des images
+    # peuvent prendre plusieurs minutes (le Job de migration attend la base).
+    retry:
+      limit: 10
+      backoff: { duration: 15s, factor: 2, maxDuration: 3m }

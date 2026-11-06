@@ -1,0 +1,25 @@
+# k3s installe Traefik lui-même (chart Helm dans kube-system). Un HelmChartConfig
+# du même nom AJOUTE des valeurs à ce chart ; k3s redéploie Traefik.
+#
+# Pourquoi : derrière Cloudflare, l'adresse qui se connecte à Traefik est celle
+# de Cloudflare (ou du relais interne de k3s), pas celle du visiteur. Cloudflare
+# écrit la vraie IP dans X-Forwarded-For ; par défaut Traefik efface cet en-tête
+# reçu de l'extérieur (il ne le croit pas). Sans cette ligne, l'API verrait tous
+# les visiteurs avec la même IP : la limite « 5 connexions / minute / IP »
+# bloquerait tout le monde à la fois.
+#
+# « insecure » = Traefik garde l'en-tête reçu. Sans risque ICI parce que le
+# pare-feu du serveur n'ouvre le 443 qu'aux plages IP de Cloudflare
+# (asesoria-infra, ADR-001 §5) : seul Cloudflare peut écrire cet en-tête.
+# L'API lit ensuite la bonne entrée avec TRUST_PROXY_HOPS=2 (Cloudflare + Traefik).
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    ports:
+      websecure:
+        forwardedHeaders:
+          insecure: true

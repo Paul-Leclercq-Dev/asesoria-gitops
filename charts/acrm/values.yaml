@@ -1,0 +1,113 @@
+# Valeurs par défaut du chart « acrm ». Chaque environnement les surcharge dans
+# son Application Argo CD (ex. clusters/demo/acrm-demo.yaml, champ valuesObject).
+# Rien de secret ici : les secrets sont des Secret Kubernetes déjà présents dans
+# l'espace de noms (créés par l'opérateur SOPS), le chart ne fait que les nommer.
+
+# Nom public de l'application : Ingress, certificat, APP_URL et CORS.
+host: app.example.com
+
+image:
+  registry: ghcr.io/paul-leclercq-dev
+  # Version publiée par release.yml (tag vX.Y.Z → images X.Y.Z). Vide = appVersion du chart.
+  # Chaque environnement la fige explicitement : changer ce numéro = déployer.
+  tag: ""
+  pullPolicy: IfNotPresent
+  # Secret « docker config » pour GHCR (paquets privés). "" si les images sont publiques.
+  pullSecret: ghcr-pull
+
+tls:
+  # ClusterIssuer cert-manager (platform/cert-manager-config).
+  issuer: letsencrypt-prod
+  # Secret du certificat. Gardé stable : bootstrap/tls-backup.sh le sauvegarde.
+  secretName: ""
+
+# Noms des Secret attendus dans l'espace de noms (clé entre parenthèses).
+secrets:
+  dbAdmin: acrm-db-admin       # basic-auth (username, password) : propriétaire du schéma, migrations
+  dbApp: acrm-db-app           # basic-auth : rôle applicatif soumis à la RLS (API, seed)
+  dbWorker: acrm-db-worker     # basic-auth : rôle du worker (lit la liste des cabinets)
+  redis: acrm-redis            # (password)
+  api: acrm-api                # (JWT_ACCESS_SECRET) ; MAILBOX_TOKEN_KEY etc. plus tard
+  s3: acrm-s3                  # (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY)
+  seed: acrm-demo-seed         # (SEED_DEMO_PASSWORD), seulement si seed.enabled
+
+# Variables NON secrètes communes à l'API et au worker (ConfigMap).
+# APP_URL, CORS_ORIGINS, SMTP_URL, S3_* et DATABASE_URL sont calculées par le chart.
+config:
+  NODE_ENV: production
+  LOG_LEVEL: info
+  SWAGGER_ENABLED: "false"
+  COOKIE_SECURE: "true"
+  # Inscription publique fermée tant que CGU + politique de confidentialité ne sont pas publiées.
+  SIGNUP_ENABLED: "false"
+  # Visiteur → Cloudflare → Traefik → API : 2 relais à croire pour lire la vraie IP.
+  TRUST_PROXY_HOPS: "2"
+  MAIL_FROM: "Expedita <no-reply@example.com>"
+  QUEUE_PREFIX: acrm
+
+# Stockage objet des documents. Défauts = ceux de l'API en local (SeaweedFS) :
+# chaque environnement les remplace (sorties Terraform du bucket).
+s3:
+  endpoint: http://localhost:8333
+  publicEndpoint: ""           # défaut : endpoint (URL présignées ouvertes par le navigateur)
+  region: eu-central-1
+  bucket: acrm-documents
+  forcePathStyle: "true"
+
+# PostgreSQL géré par l'opérateur CloudNativePG (déjà installé dans le cluster).
+postgres:
+  enabled: true
+  clusterName: acrm-db         # service d'écriture : <clusterName>-rw
+  database: acrm
+  # Image figée par digest (catalogue CloudNativePG « standard » : contrib, pgvector, locales).
+  image: ghcr.io/cloudnative-pg/postgresql:17.11-202611020810-standard-trixie@sha256:4d0aac315c4d8c3202252bd06fea83b16951cc57234a7b610eeaa382ff4482d0
+  storageSize: 5Gi
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+# Redis des files BullMQ, sans persistance (files perdues au redémarrage).
+redis:
+  enabled: true
+  image: redis:7.4.12-alpine
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+# Boîte SMTP de test : AUCUN e-mail ne sort du cluster (invitations, rappels…).
+mailpit:
+  enabled: true
+  image: axllent/mailpit:v1.33.0
+  resources:
+    requests: { cpu: 5m, memory: 24Mi }
+    limits: { memory: 96Mi }
+
+api:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { memory: 512Mi }
+
+worker:
+  resources:
+    requests: { cpu: 20m, memory: 160Mi }
+    limits: { memory: 384Mi }
+
+web:
+  replicas: 1
+  resources:
+    requests: { cpu: 5m, memory: 16Mi }
+    limits: { memory: 64Mi }
+
+migrator:
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { memory: 512Mi }
+
+# Données fictives (Job après chaque synchronisation, idempotent). JAMAIS en production.
+seed:
+  enabled: false
+  scale: 1                     # SEED_SCALE : ×N contacts, leads, dossiers
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 768Mi }

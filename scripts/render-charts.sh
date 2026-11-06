@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Rend chaque chart Helm référencé dans clusters/demo/ (même version, mêmes
-# valeurs qu'Argo CD) et valide le résultat avec kubeconform. Attrape avant le
-# merge : une version de chart inexistante, une valeur mal placée qui casse le
-# rendu, un objet invalide.
+# Rend chaque chart Helm référencé dans clusters/demo/, distant ou local
+# (charts/), avec la même version et les mêmes valeurs qu'Argo CD, et valide
+# le résultat avec kubeconform. Attrape avant le merge : une version de chart
+# inexistante, une valeur mal placée qui casse le rendu, un objet invalide.
 # Prérequis : helm, yq (mikefarah, v4), kubeconform.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -17,7 +17,11 @@ for app in clusters/demo/*.yaml; do
   # Source du chart : `spec.source` ou la première entrée de `spec.sources`.
   src='(.spec.source // .spec.sources[0])'
   chart="$(yq "$src.chart // \"\"" "$app")"
-  [ -n "$chart" ] || continue
+  path="$(yq "$src.path // \"\"" "$app")"
+  # Chart distant (repoURL + chart) ou chart de CE dépôt (path contenant Chart.yaml).
+  if [ -z "$chart" ] && { [ -z "$path" ] || [ ! -f "$path/Chart.yaml" ]; }; then
+    continue
+  fi
 
   name="$(yq '.metadata.name' "$app")"
   repo="$(yq "$src.repoURL" "$app")"
@@ -36,10 +40,18 @@ for app in clusters/demo/*.yaml; do
     [ -n "$vf" ] && args+=(--values "${vf#\$values/}")
   done < <(yq "$src.helm.valueFiles // [] | .[]" "$app")
 
-  echo "==> $name : $chart $version ($repo)"
-  helm template "$release" "$chart" --repo "$repo" --version "$version" \
-    --namespace "$namespace" --kube-version "$K8S_VERSION" --include-crds \
-    "${args[@]}" > "$work/$name.yaml"
+  if [ -n "$chart" ]; then
+    echo "==> $name : $chart $version ($repo)"
+    helm template "$release" "$chart" --repo "$repo" --version "$version" \
+      --namespace "$namespace" --kube-version "$K8S_VERSION" --include-crds \
+      "${args[@]}" > "$work/$name.yaml"
+  else
+    echo "==> $name : chart local $path"
+    helm lint --strict "$path" --namespace "$namespace" "${args[@]}"
+    helm template "$release" "$path" \
+      --namespace "$namespace" --kube-version "$K8S_VERSION" \
+      "${args[@]}" > "$work/$name.yaml"
+  fi
 
   # Non strict : les charts tiers ont parfois des champs tolérés par l'API.
   kubeconform -summary -output text -ignore-missing-schemas \
