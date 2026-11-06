@@ -1,0 +1,63 @@
+# Migrations Prisma (`prisma migrate deploy`), rejouées à chaque synchronisation
+# Argo CD : sans effet si la base est à jour. Hook « Sync », vague 1 : après la
+# base (vague 0), AVANT les nouveaux pods de l'API et du worker (vague 2). Si
+# une migration échoue, la synchronisation s'arrête et l'ancienne version reste.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "migrate") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        {{- include "acrm.selector" (dict "root" $ "component" "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- include "acrm.podSecurity" (dict "root" $) | nindent 6 }}
+      initContainers:
+        # Attend que la base accepte les connexions ET que l'opérateur ait créé
+        # acrm_app et acrm_worker. Sans cela, une migration qui fait « GRANT … TO
+        # acrm_app » échouerait et resterait marquée « en échec » (P3009) : il
+        # faudrait une intervention à la main pour débloquer.
+        - name: wait-for-roles
+          image: {{ .Values.postgres.image }}
+          command:
+            - sh
+            - -c
+            - |
+              until [ "$(psql "$DATABASE_ADMIN_URL" -tAc "SELECT count(*) FROM pg_roles WHERE rolname IN ('acrm_app','acrm_worker')" 2>/dev/null)" = "2" ]; do
+                echo "En attente de PostgreSQL et des rôles acrm_app / acrm_worker…"; sleep 5
+              done
+              echo "Base prête."
+          env:
+            {{- include "acrm.dbEnv" (dict "root" $ "secret" .Values.secrets.dbAdmin "user" "acrm_admin" "var" "DATABASE_ADMIN_URL") | nindent 12 }}
+          {{- include "acrm.containerSecurity" (dict "uid" 26) | nindent 10 }}
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+      containers:
+        - name: migrate
+          image: {{ include "acrm.image" (dict "root" $ "name" "acrm-api-migrator") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "acrm.dbEnv" (dict "root" $ "secret" .Values.secrets.dbAdmin "user" "acrm_admin" "var" "DATABASE_ADMIN_URL") | nindent 12 }}
+            # La CLI Prisma écrit son cache dans $HOME : on le place dans /tmp (seul
+            # dossier inscriptible), et on coupe sa télémétrie. Vérifié par le smoke
+            # test de la CI du CRM, lancé lui aussi en lecture seule.
+            - { name: HOME, value: /tmp }
+            - { name: CHECKPOINT_DISABLE, value: "1" }
+          {{- include "acrm.containerSecurity" (dict "uid" 1000) | nindent 10 }}
+          resources:
+            {{- toYaml .Values.migrator.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        {{- include "acrm.tmpVolume" . | nindent 8 }}

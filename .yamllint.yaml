@@ -1,6 +1,8 @@
 extends: default
 ignore: |
   .backup/
+  # Gabarits Helm : du YAML avec des balises {{ }}, validé après rendu (scripts/render-charts.sh).
+  charts/*/templates/
   # Fichiers réécrits par sops (son propre style d'indentation).
   *.sops.yaml
   !.sops.yaml

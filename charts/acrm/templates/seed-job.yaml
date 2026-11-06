@@ -1,0 +1,45 @@
+{{- if .Values.seed.enabled }}
+# Données FICTIVES de démonstration (cabinets « demo-levante » et « demo-norte »).
+# Hook « PostSync » : une fois tout le reste « Healthy ». Idempotent : un cabinet
+# déjà présent est ignoré, donc sans effet après la première fois.
+# Le seed refuse NODE_ENV=production : on le met à « development » pour ce seul
+# Job, et le chart ne l'active que si seed.enabled=true (démo).
+# Mot de passe des comptes de démo : secret {{ .Values.secrets.seed }}, jamais affiché dans les logs.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-seed
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "seed") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        {{- include "acrm.selector" (dict "root" $ "component" "seed") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- include "acrm.podSecurity" (dict "root" $) | nindent 6 }}
+      containers:
+        - name: seed
+          image: {{ include "acrm.image" (dict "root" $ "name" "acrm-api-seeder") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "acrm.dbEnv" (dict "root" $ "secret" .Values.secrets.dbApp "user" "acrm_app" "var" "DATABASE_URL") | nindent 12 }}
+            - { name: NODE_ENV, value: development }
+            - { name: SEED_SCALE, value: {{ .Values.seed.scale | quote }} }
+            - name: SEED_DEMO_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secrets.seed }}, key: SEED_DEMO_PASSWORD }
+          {{- include "acrm.containerSecurity" (dict "uid" 1000) | nindent 10 }}
+          resources:
+            {{- toYaml .Values.seed.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }   # cache de tsx
+      volumes:
+        {{- include "acrm.tmpVolume" . | nindent 8 }}
+{{- end }}

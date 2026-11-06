@@ -1,0 +1,54 @@
+# Un seul hôte pour le front ET l'API (cookie de session SameSite=Strict, ADR-017
+# du CRM) : /v1 → API, tout le reste → front. Traefik (fourni par k3s) reçoit le
+# HTTPS de Cloudflare sur le 443 avec le certificat ci-dessous.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "ingress") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [{{ .Values.host | quote }}]
+      secretName: {{ include "acrm.tlsSecret" . }}
+  rules:
+    - host: {{ .Values.host | quote }}
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-api
+                port: { name: http }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-web
+                port: { name: http }
+---
+# Certificat Let's Encrypt (défi DNS-01 Cloudflare). Même nom de secret que la
+# page de test de 4.2a : la sauvegarde bootstrap/tls-backup.sh reste valable.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.host | replace "." "-" }}
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "tls") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  secretName: {{ include "acrm.tlsSecret" . }}
+  dnsNames: [{{ .Values.host | quote }}]
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ .Values.tls.issuer }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256

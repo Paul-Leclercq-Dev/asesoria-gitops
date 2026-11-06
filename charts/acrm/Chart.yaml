@@ -1,0 +1,10 @@
+apiVersion: v2
+name: acrm
+description: >-
+  Expedita (asesoria-crm) : front, API, worker et migrations ; en option la base
+  PostgreSQL (CloudNativePG), Redis, une boîte SMTP de test (Mailpit) et les
+  données de démo. Un environnement = une Application Argo CD qui surcharge
+  values.yaml.
+type: application
+version: 0.1.0
+appVersion: "0.2.0"

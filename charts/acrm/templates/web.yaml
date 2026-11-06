@@ -1,0 +1,53 @@
+# Front React servi par nginx sans root (port 8080), en lecture seule.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-web
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "web") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      {{- include "acrm.selector" (dict "root" $ "component" "web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acrm.selector" (dict "root" $ "component" "web") | nindent 8 }}
+    spec:
+      {{- include "acrm.podSecurity" (dict "root" $) | nindent 6 }}
+      containers:
+        - name: web
+          image: {{ include "acrm.image" (dict "root" $ "name" "acrm-web") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          {{- include "acrm.containerSecurity" (dict "uid" 101) | nindent 10 }}
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: nginx-cache, mountPath: /var/cache/nginx }
+      volumes:
+        {{- include "acrm.tmpVolume" . | nindent 8 }}
+        - name: nginx-cache
+          emptyDir: { sizeLimit: 32Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-web
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "web") | nindent 4 }}
+spec:
+  selector:
+    {{- include "acrm.selector" (dict "root" $ "component" "web") | nindent 4 }}
+  ports:
+    - { name: http, port: 8080, targetPort: http }

@@ -1,0 +1,22 @@
+# Configuration non secrète de l'API et du worker. Un changement ici redémarre
+# leurs pods (annotation checksum/config dans les Deployments).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "config") | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  APP_URL: {{ printf "https://%s" .Values.host | quote }}
+  CORS_ORIGINS: {{ printf "https://%s" .Values.host | quote }}
+  {{- if .Values.mailpit.enabled }}
+  SMTP_URL: {{ printf "smtp://%s-mailpit:1025" .Release.Name | quote }}
+  {{- end }}
+  S3_ENDPOINT: {{ .Values.s3.endpoint | quote }}
+  S3_PUBLIC_ENDPOINT: {{ .Values.s3.publicEndpoint | default .Values.s3.endpoint | quote }}
+  S3_REGION: {{ .Values.s3.region | quote }}
+  S3_BUCKET: {{ .Values.s3.bucket | quote }}
+  S3_FORCE_PATH_STYLE: {{ .Values.s3.forcePathStyle | quote }}
