@@ -31,10 +31,14 @@ spec:
             # Version du CRM déployée : changer ce numéro (PR) = déployer une version.
             # Depuis 4.3, la PR est ouverte par release.yml du CRM (« release/vX.Y.Z ») :
             # elle met à jour le tag ET les empreintes ci-dessous. Merger = déployer.
-            tag: "0.2.0"
+            tag: "0.2.2"
             # Empreinte exacte de chaque image (scannée et signée par release.yml).
             # Vide pour 0.2.0 (publiée avant 4.3) : tirée par tag seulement.
-            digests: {}
+            digests:
+              acrm-api-migrator: "sha256:989998cf80b291df59d8f93de5ade6a96a2a774b433947923ba151a3e7c44415"
+              acrm-api-seeder: "sha256:c2afa9998e3f8375e93fc1c23be3feb2289f2f72dc7bf7e6c2cc0e34720ef9a2"
+              acrm-api: "sha256:8efbf995f2943f1d89dadb34a7f8cf2dbbd226c794068ba2dbcd323601d20a3f"
+              acrm-web: "sha256:5796b30983b8cfe96093d0f56a29d675d66c2525c2bf1272a9d12d7a4c9ee6c5"
           config:
             MAIL_FROM: "Expedita (démo) <no-reply@tramelya.es>"
           s3:
