@@ -1,6 +1,6 @@
-# Amorcer la plateforme GitOps (phases 4.2a et 4.2b)
+# Amorcer la plateforme GitOps (phases 4.2a, 4.2b et 4.3)
 
-Ce runbook se suit **dans l'ordre**, une étape à la fois. Chaque étape dit ce qu'elle fait, pourquoi, ce qu'elle crée (sur le Mac, sur GitHub, sur le serveur payant) et ce que tu dois voir. Les étapes 1 à 4 et 10 ne se font **qu'une fois** ; les étapes 5 à 9 se refont à chaque cluster neuf ; l'étape 11 est le test chronométré de la phase 4.
+Ce runbook se suit **dans l'ordre**, une étape à la fois. Chaque étape dit ce qu'elle fait, pourquoi, ce qu'elle crée (sur le Mac, sur GitHub, sur le serveur payant) et ce que tu dois voir. Les étapes 1 à 4 et 10 ne se font **qu'une fois** ; les étapes 5 à 9 se refont à chaque cluster neuf ; l'étape 11 est le test chronométré de la phase 4 ; l'étape 12 (déploiement automatique et durcissement, 4.3) se fait une fois.
 
 ## 0. Les notions, en une phrase chacune
 
@@ -216,6 +216,110 @@ But : prouver qu'en partant d'un **serveur détruit**, Terraform + Argo CD recr�
 
 Ce que le test ne couvre PAS (volontairement) : le bucket et les zones DNS, qui survivent au serveur (`envs/demo-data`, zones Cloudflare) ; les données saisies pendant la démo précédente (la base repart des données fictives).
 
+## 12. Déploiement automatique et durcissement (phase 4.3, une fois)
+
+Où tu en es : le CRM tourne (étape 10). Jusqu'ici, un `git tag` publiait les images mais **ne déployait rien** : il fallait éditer `image.tag` à la main. Cette étape ajoute (1) une PR de déploiement ouverte toute seule par la release du CRM, (2) un pare-feu entre les pods, (3) un contrôle des pods à l'entrée de l'espace de noms. Décisions : [ADR-003](adr/003-cd-et-durcissement.md).
+
+| Notion | Ce que c'est | Analogie |
+|---|---|---|
+| **CD** (déploiement continu) | Ce qui fait passer une version publiée jusqu'au cluster. Ici : une PR dans ce dépôt ; Argo CD applique au merge. | Le bon de livraison que tu signes : sans signature, le colis reste au dépôt. |
+| **Empreinte / digest** (`sha256:…`) | L'identifiant calculé à partir du contenu de l'image. Un tag (`0.3.0`) est une étiquette qu'on peut recoller ailleurs ; une empreinte, non. | Le numéro de série gravé, contre l'étiquette collée sur le carton. |
+| **GitHub App** | Un « compte robot » à toi, avec des droits choisis, sur les dépôts choisis, qui obtient des jetons d'une heure. | Un badge visiteur nominatif, valable une heure, pour une seule porte. |
+| **NetworkPolicy** | Règle de pare-feu entre pods : qui peut parler à qui, sur quel port. Sans règle, tout le monde parle à tout le monde. | Les portes coupe-feu d'un immeuble : fermées par défaut, badge par porte. |
+| **Pod Security `restricted`** | Étiquette posée sur un namespace : Kubernetes refuse tout pod en root, privilégié ou avec des capacités Linux. | Le portique à l'entrée : un pod mal habillé ne rentre pas. |
+| **AppProject** (Argo CD) | La liste de ce qu'une Application a le droit de déployer (dépôts, namespaces, types d'objets). | Le badge d'accès du chef de chantier : quels étages, quelles pièces. |
+
+Ordre : **12.1 → 12.4 dans ce dépôt (gitops)**, puis 12.5 → 12.7 côté CRM. Ne merge pas la PR du CRM avant d'avoir fini 12.4.
+
+### 12.1 Vérifier AVANT le merge que les pods passent le portique
+
+Ce que ça fait : demande au cluster « si je posais l'étiquette `restricted`, quels pods existants seraient refusés ? » **sans rien changer** (`--dry-run=server` = le serveur simule et répond, puis oublie).
+
+```bash
+kubectl label --dry-run=server --overwrite ns acrm-demo pod-security.kubernetes.io/enforce=restricted
+```
+
+| Morceau | Sens |
+|---|---|
+| `label … ns acrm-demo` | poser une étiquette sur le namespace `acrm-demo` |
+| `--overwrite` | la remplacer si elle existe déjà |
+| `--dry-run=server` | simulation par le serveur : rien n'est écrit |
+
+Attendu : `namespace/acrm-demo labeled (server dry run)` **sans ligne `Warning:`**. S'il y a des `Warning: existing pods … violate …` : **ne merge pas**, envoie-moi la sortie.
+
+### 12.2 Vérifier par où les pods de la base joignent l'API Kubernetes
+
+La base (CloudNativePG) doit parler à l'API Kubernetes ; la NetworkPolicy n'ouvre que le port **6443**. On vérifie que c'est bien ce port :
+
+```bash
+kubectl get endpoints kubernetes -n default
+```
+
+Attendu : une ligne `kubernetes   <IP>:6443`. Si le port affiché n'est pas 6443 : envoie-moi la sortie avant de merger.
+
+### 12.3 Merger la PR du dépôt gitops
+
+PR de la branche `feat/cd-hardening` → CI verte (rendu Helm, kubeconform, Trivy) → merge. Argo CD applique dans les 3 minutes : namespace étiqueté, projet `acrm`, 9 NetworkPolicies. **Aucun pod ne redémarre** (les images ne changent pas).
+
+### 12.4 Vérifier que tout marche… et que le pare-feu ferme vraiment
+
+```bash
+kubectl -n argocd get application acrm-demo                 # 1. Synced + Healthy
+kubectl -n argocd get application acrm-demo -o jsonpath='{.spec.project}{"\n"}'   # 2. acrm
+kubectl -n acrm-demo get networkpolicy                      # 3. 9 lignes
+kubectl get ns acrm-demo --show-labels | tr ',' '\n' | grep pod-security   # 4. enforce=restricted…
+```
+
+Puis le test qui compte : **se connecter** sur `https://app.tramelya.es` et ouvrir un document (prouve Traefik → API → base, Redis et S3). Enfin la preuve que ça bloque : depuis le pod du front (qui n'a le droit d'appeler personne), on essaie de joindre l'API :
+
+```bash
+kubectl -n acrm-demo exec deploy/acrm-web -- wget -q -T 3 -O- http://acrm-api:3000/v1/health/live; echo "code=$?"
+```
+
+Attendu : après 3 s, `wget: download timed out` et `code=1` (bloqué = bien). Si tu vois `{"status":"ok"…}`, les politiques ne sont pas appliquées : envoie-moi la sortie.
+
+### 12.5 Créer la GitHub App (sur GitHub, gratuit, 5 min)
+
+1. GitHub → photo de profil → **Settings** → **Developer settings** → **GitHub Apps** → **New GitHub App**.
+2. **GitHub App name** : `tramelya-gitops-bot` (si pris : ajoute un suffixe). **Homepage URL** : `https://github.com/Paul-Leclercq-Dev/asesoria-gitops`.
+3. **Webhook** : décocher **Active** (l'App ne reçoit rien, elle agit seulement quand le job la sollicite).
+4. **Repository permissions** : **Contents → Read and write**, **Pull requests → Read and write**. (Metadata passe en lecture tout seul.) Rien d'autre.
+5. **Where can this GitHub App be installed?** → **Only on this account**. → **Create GitHub App**.
+6. Sur la page de l'App : noter le **Client ID** (commence par `Iv`). En bas : **Generate a private key** → un fichier `.pem` est téléchargé. C'est un secret : il ne va **jamais** dans un dépôt.
+7. Menu de gauche **Install App** → **Install** → **Only select repositories** → `asesoria-gitops` seul → **Install**.
+
+Ce que ça crée : un robot qui ne peut écrire que dans `asesoria-gitops`. Rien de payant.
+
+### 12.6 Donner l'App au dépôt du CRM
+
+Pourquoi un « environnement » : un secret de dépôt est lisible par **tous** les workflows de toutes les branches. Un secret d'environnement n'est donné qu'aux jobs qui déclarent cet environnement, et ici seulement quand ils tournent sur un tag `v*`. *Analogie : la clé du camion de livraison est au guichet « départs », pas sur le tableau commun.*
+
+1. `asesoria-crm` → **Settings** → **Environments** → **New environment** : nom `release` → **Configure environment**.
+2. **Deployment branches and tags** → **Selected branches and tags** → **Add deployment branch or tag rule** → type **Tag**, motif `v*` → **Add rule**.
+3. Même page, **Environment secrets** → **Add environment secret** : nom `GITOPS_APP_PRIVATE_KEY`, valeur = **tout** le contenu du `.pem` (lignes `-----BEGIN…` et `-----END…` comprises).
+4. **Settings** → **Secrets and variables** → **Actions** → onglet **Variables** → **New repository variable** : nom `GITOPS_APP_CLIENT_ID`, valeur = le Client ID (pas secret : c'est un identifiant ; au niveau du dépôt car le job le lit pour décider s'il tourne).
+
+Puis ranger le `.pem` dans ton gestionnaire de mots de passe et le supprimer de `~/Downloads`.
+
+Enfin, côté **`asesoria-gitops`** : **Settings** → **Branches** (ou **Rules → Rulesets**) → règle sur `main` : **Require a pull request before merging** + **Require status checks to pass** (les 3 jobs de `validate`), **sans** exception pour l'App. Ainsi, même avec son jeton, le robot ne peut que *proposer* (PR), jamais pousser sur `main` — et c'est `main` qu'Argo CD applique. Si cette règle existe déjà, vérifie juste qu'aucune exception (« bypass ») n'est accordée.
+
+### 12.7 Premier déploiement automatique
+
+Après le merge de la PR du CRM (`feat/release-gitops-pr`) et sa CI verte sur `main` :
+
+```bash
+cd ~/dev/asesoria-crm && git switch main && git pull
+git tag -a v0.2.1 -m "v0.2.1" && git push origin v0.2.1
+```
+
+Ce qui se passe (onglet **Actions** du CRM, ≈ 10 min) : garde → 4 images → release → **PR de version dans asesoria-gitops**. Dans `asesoria-gitops`, ouvre la PR `deploy(demo): acrm 0.2.1` : le diff ne doit toucher que `tag` et les 4 lignes `digests`. CI verte → merge. Puis :
+
+```bash
+kubectl -n acrm-demo get pods -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}' | sort -u
+```
+
+Attendu : des images `…:0.2.1@sha256:…`. Le CRM répond toujours sur `https://app.tramelya.es`.
+
 ## Dépannage
 
 | Symptôme | Commande | Cause fréquente |
@@ -233,3 +337,7 @@ Ce que le test ne couvre PAS (volontairement) : le bucket et les zones DNS, qui 
 | Job `acrm-migrate` bloqué « En attente de PostgreSQL et des rôles » | `kubectl -n acrm-demo get cluster acrm-db` puis `describe` | Base pas encore prête (attendre 1 à 2 min) ; secret `acrm-db-app` / `-worker` absent (rôles non créés). |
 | API `0/1 Ready` | `kubectl -n acrm-demo logs deploy/acrm-api \| tail -20` | Variable invalide (message zod au démarrage) ; base ou Redis injoignable (`/v1/health/ready`). |
 | Envoi de document en erreur `STORAGE_UNAVAILABLE` | `kubectl -n acrm-demo logs deploy/acrm-api \| grep -i s3` | Bucket ou clés S3 : comparer `terraform output` (envs/demo-data) et le secret `acrm-s3`. |
+| PR de version jamais ouverte après un tag | Actions du CRM → job « PR de version » | Job sauté : variable `GITOPS_APP_CLIENT_ID` absente (12.6). Erreur `Not Found` / `401` : App non installée sur `asesoria-gitops`, ou clé `.pem` incomplète. |
+| Après 4.3, une fonction qui appelle l'extérieur échoue par délai dépassé | `kubectl -n acrm-demo get networkpolicy` | Flux non ouvert : toute nouvelle sortie (SMTP réel, Gmail, IA) s'ajoute dans `charts/acrm/templates/networkpolicy.yaml`. |
+| Après 4.3, un pod n'est jamais créé (`FailedCreate`, « violates PodSecurity ») | `kubectl -n acrm-demo get events --field-selector reason=FailedCreate` | Conteneur sans `runAsNonRoot` / `capabilities.drop: [ALL]` / seccomp : corriger le template (ne pas retirer l'étiquette). |
+| `acrm-demo` en erreur « not permitted in project » | `kubectl -n argocd get application acrm-demo -o jsonpath='{.status.conditions}'` | Le chart crée un objet hors `acrm-demo` ou de cluster : `clusters/demo/project-acrm.yaml`. |

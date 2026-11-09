@@ -11,6 +11,9 @@ image:
   # Version publiée par release.yml (tag vX.Y.Z → images X.Y.Z). Vide = appVersion du chart.
   # Chaque environnement la fige explicitement : changer ce numéro = déployer.
   tag: ""
+  # Empreintes (digest) par image, écrites par la PR automatique de release.yml.
+  # Vide = on tire par tag seulement. Ex. : { acrm-api: "sha256:…", acrm-web: "sha256:…" }
+  digests: {}
   pullPolicy: IfNotPresent
   # Secret « docker config » pour GHCR (paquets privés). "" si les images sont publiques.
   pullSecret: ghcr-pull
@@ -111,3 +114,35 @@ seed:
   resources:
     requests: { cpu: 50m, memory: 256Mi }
     limits: { memory: 768Mi }
+
+# Pare-feu entre pods (templates/networkpolicy.yaml, ADR-003) : tout interdit par
+# défaut, puis ouvertures explicites. Les valeurs ci-dessous décrivent les VOISINS
+# (hors de cet espace de noms) avec qui le CRM a le droit de parler.
+networkPolicy:
+  enabled: true
+  # Contrôleur d'entrée qui envoie les visiteurs (k3s : Traefik dans kube-system).
+  ingressController:
+    namespace: kube-system
+    podLabels: { app.kubernetes.io/name: traefik }
+  # DNS du cluster (k3s : CoreDNS dans kube-system).
+  dns:
+    namespace: kube-system
+    podLabels: { k8s-app: kube-dns }
+  # Opérateur CloudNativePG (tout l'espace de noms : il n'y a que lui).
+  cnpgOperator:
+    namespace: cnpg-system
+  # API Kubernetes vue par les pods de la base. k3s : l'IP du nœud, port 6443.
+  # 0.0.0.0/0 car l'IP du nœud change à chaque reconstruction ; seul le port est ouvert.
+  # Vérifier : kubectl get endpoints kubernetes -n default
+  apiServer:
+    cidr: 0.0.0.0/0
+    ports: [6443]
+  # Sorties HTTPS de l'API et du worker vers Internet (S3 OVH, plus tard Google / Microsoft).
+  externalHttps:
+    enabled: true
+    except:
+      - 10.0.0.0/8        # pods (10.42) et services (10.43) de k3s, réseau privé OVH
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 100.64.0.0/10
+      - 169.254.0.0/16    # adresse de métadonnées du cloud (169.254.169.254)

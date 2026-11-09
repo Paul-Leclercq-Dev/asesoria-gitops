@@ -1,0 +1,25 @@
+# Espace de noms du CRM de démo, décrit dans Git (phase 4.3) pour y poser les
+# étiquettes « Pod Security » : Kubernetes REFUSE alors de créer un pod qui ne
+# respecte pas le profil « restricted » (non-root, pas d'élévation de privilèges,
+# capacités Linux retirées, profil seccomp, volumes simples). Un contrôle à
+# l'entrée, comme un portique : un pod mal configuré n'est jamais lancé.
+#   enforce = refuser ; warn = avertir la personne qui applique ; audit = journaliser.
+# « latest » = la version des règles du Kubernetes installé.
+# Vague -2 : avant les secrets (-1) et tout le reste.
+# Prune=false, Delete=false : si ce fichier disparaissait par erreur (ou si l'Application
+# était supprimée), Argo CD NE supprime PAS l'espace de noms — sinon la base et son
+# volume partiraient avec. Pour le supprimer vraiment : kubectl delete ns acrm-demo.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: acrm-demo
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest

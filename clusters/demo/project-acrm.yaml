@@ -1,0 +1,37 @@
+# AppProject « acrm » (phase 4.3) : la liste de ce que l'Application du CRM a le
+# DROIT de faire, vérifiée par Argo CD avant chaque synchronisation.
+# Analogie : un badge d'accès. Le projet « default » ouvre toutes les portes
+# (n'importe quel dépôt, n'importe quel espace de noms, objets de tout le cluster) ;
+# ce badge-ci n'ouvre que :
+#   - une source : ce dépôt ;
+#   - une destination : l'espace de noms acrm-demo de ce cluster ;
+#   - un seul type d'objet « de cluster » : le Namespace lui-même.
+# Si quelqu'un glissait un ClusterRole ou un objet dans kube-system dans le chart,
+# Argo CD refuserait la synchronisation au lieu de l'appliquer.
+# Vague -1 : le projet existe avant l'Application qui s'y rattache (vague 2).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: acrm
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  # Empêche de supprimer le projet tant qu'une Application l'utilise.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: CRM (Tramelya) — démo
+  sourceRepos:
+    - https://github.com/Paul-Leclercq-Dev/asesoria-gitops.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: acrm-demo
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  # Objets que le CRM ne gère jamais lui-même (quotas et limites = choix de la plateforme).
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange

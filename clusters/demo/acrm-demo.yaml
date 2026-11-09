@@ -2,8 +2,9 @@
 # test « hello » de 4.2a : même espace de noms, même certificat.
 # Deux sources :
 #   1. le chart charts/acrm, avec les valeurs de la démo ci-dessous ;
-#   2. apps/acrm-demo/ : les secrets chiffrés SOPS (générés par scripts/acrm-secrets.sh).
-# Ordre dans l'Application : secrets (-1) → base, Redis, Mailpit, certificat (0)
+#   2. apps/acrm-demo/ : l'espace de noms (étiquettes Pod Security) et les secrets
+#      chiffrés SOPS (générés par scripts/acrm-secrets.sh).
+# Ordre dans l'Application : espace de noms (-2) → secrets (-1) → base, Redis, Mailpit, certificat (0)
 # → migrations (1) → API, worker, front, Ingress (2) → données de démo (après).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -16,7 +17,8 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: default
+  # Badge d'accès restreint (clusters/demo/project-acrm.yaml, phase 4.3).
+  project: acrm
   sources:
     - repoURL: https://github.com/Paul-Leclercq-Dev/asesoria-gitops.git
       targetRevision: main
@@ -27,7 +29,12 @@ spec:
           host: app.tramelya.es
           image:
             # Version du CRM déployée : changer ce numéro (PR) = déployer une version.
+            # Depuis 4.3, la PR est ouverte par release.yml du CRM (« release/vX.Y.Z ») :
+            # elle met à jour le tag ET les empreintes ci-dessous. Merger = déployer.
             tag: "0.2.0"
+            # Empreinte exacte de chaque image (scannée et signée par release.yml).
+            # Vide pour 0.2.0 (publiée avant 4.3) : tirée par tag seulement.
+            digests: {}
           config:
             MAIL_FROM: "Expedita (démo) <no-reply@tramelya.es>"
           s3:
@@ -45,12 +52,19 @@ spec:
     server: https://kubernetes.default.svc
     namespace: acrm-demo
   syncPolicy:
-    automated: { prune: true, selfHeal: true }
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
+      # L'espace de noms est décrit dans apps/acrm-demo/namespace.yaml (vague -2) ;
+      # CreateNamespace reste un filet si Argo CD le crée avant de l'avoir lu.
       - CreateNamespace=true
       - SkipDryRunOnMissingResource=true
     # Premier démarrage : la base et le premier téléchargement des images
     # peuvent prendre plusieurs minutes (le Job de migration attend la base).
     retry:
       limit: 10
-      backoff: { duration: 15s, factor: 2, maxDuration: 3m }
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m
