@@ -15,10 +15,24 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
-{{/* Image d'un composant publiée sur GHCR. Usage : include "acrm.image" (dict "root" $ "name" "acrm-api") */}}
+{{/*
+Image d'un composant publiée sur GHCR. Usage : include "acrm.image" (dict "root" $ "name" "acrm-api")
+Avec une empreinte (image.digests.<nom>, écrite par la PR de version de release.yml) :
+  ghcr.io/…/acrm-api:0.3.0@sha256:…  → Kubernetes tire l'image PAR L'EMPREINTE (le tag
+  n'est plus qu'une étiquette lisible) : même si quelqu'un déplaçait le tag sur GHCR,
+  le cluster continuerait d'exécuter exactement l'image scannée et signée.
+*/}}
 {{- define "acrm.image" -}}
 {{- $tag := .root.Values.image.tag | default .root.Chart.AppVersion -}}
+{{- $digest := index (.root.Values.image.digests | default dict) .name | default "" -}}
+{{- if $digest -}}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" $digest) -}}
+{{- fail (printf "image.digests.%s invalide (attendu sha256:<64 hex>) : %s" .name $digest) -}}
+{{- end -}}
+{{ printf "%s/%s:%s@%s" .root.Values.image.registry .name $tag $digest }}
+{{- else -}}
 {{ printf "%s/%s:%s" .root.Values.image.registry .name $tag }}
+{{- end }}
 {{- end }}
 
 {{- define "acrm.tlsSecret" -}}

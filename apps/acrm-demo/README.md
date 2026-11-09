@@ -1,7 +1,12 @@
 # Secrets du CRM de démo
 
 Ce dossier est la 2ᵉ source de l'Application `acrm-demo` (`clusters/demo/acrm-demo.yaml`).
-Il ne contient que `acrm-secrets.sops.yaml` : une ressource `SopsSecret` **chiffrée**
+Il contient :
+
+- `namespace.yaml` : l'espace de noms `acrm-demo` avec les étiquettes **Pod Security
+  `restricted`** (phase 4.3 : Kubernetes refuse tout pod qui tournerait en root, avec
+  des privilèges ou des capacités Linux) ;
+- `acrm-secrets.sops.yaml` : une ressource `SopsSecret` **chiffrée**
 que l'opérateur SOPS transforme, dans le cluster, en 8 Secret Kubernetes
 (mots de passe PostgreSQL et Redis, secret JWT, clés S3, mot de passe de démo,
 accès à GHCR).

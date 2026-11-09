@@ -21,4 +21,4 @@
 
 - Déployer une version du CRM = un tag dans `asesoria-crm`, puis une PR qui change `image.tag` ici.
 - La base vit sur le disque du nœud (`local-path`) : détruire le serveur la détruit. Les données de démo reviennent seules (seed) ; les documents envoyés restent orphelins dans le bucket (asesoria-infra ADR-001 §13).
-- Restent pour 4.3 : NetworkPolicies, PodSecurity `restricted` imposé par namespace, PodDisruptionBudget, HPA de l'API, mise à jour automatique de `image.tag` par la CI du CRM.
+- Traité en 4.3 ([ADR-003](003-cd-et-durcissement.md)) — restaient pour 4.3 : NetworkPolicies, PodSecurity `restricted` imposé par namespace, PodDisruptionBudget, HPA de l'API, mise à jour automatique de `image.tag` par la CI du CRM.

@@ -1,0 +1,255 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy -}}
+{{- $db := .Values.postgres.clusterName -}}
+# Pare-feu ENTRE les pods de l'espace de noms (phase 4.3, ADR-003).
+#
+# Principe : « tout est interdit, sauf ce qui est écrit ici ». Une NetworkPolicy
+# sélectionne des pods (podSelector) et liste ce qu'ils ont le droit de recevoir
+# (ingress) et d'envoyer (egress). Dès qu'un pod est sélectionné par une
+# politique pour un sens, tout ce qui n'est pas autorisé dans ce sens est bloqué.
+# Les autorisations s'ADDITIONNENT : chaque politique ci-dessous ouvre un flux.
+# Dans k3s, c'est le contrôleur intégré (kube-router) qui applique ces règles.
+#
+# Flux ouverts :
+#   Traefik ─▶ web:8080, api:3000            (visiteurs, via Cloudflare)
+#   api, worker ─▶ Redis:6379, Mailpit:1025  (files BullMQ, e-mails de démo)
+#   api, worker, migrate, seed ─▶ base:5432
+#   opérateur CloudNativePG ─▶ base:5432, 8000 (pilotage de l'instance)
+#   base ─▶ API Kubernetes                   (l'instance lit sa propre définition)
+#   api, worker ─▶ Internet en HTTPS:443     (S3 OVH ; Google / Microsoft plus tard)
+#   tous ─▶ DNS du cluster:53
+# Les sondes du kubelet (readiness/liveness) partent du nœud lui-même : kube-router
+# les laisse passer, elles ne sont pas concernées.
+---
+# 1. Tout interdit par défaut, dans les deux sens, pour TOUS les pods de l'espace
+#    de noms (podSelector vide = tous les pods).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# 2. Tous les pods peuvent résoudre des noms (acrm-db-rw, s3.gra.io.cloud.ovh.net…)
+#    auprès du DNS du cluster (CoreDNS), et seulement lui.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-dns
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $np.dns.namespace }} }
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.dns.podLabels | nindent 14 }}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# 3. Le front ne reçoit que Traefik, sur son port. Il n'envoie rien (fichiers statiques).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-web
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "acrm.selector" (dict "root" $ "component" "web") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $np.ingressController.namespace }} }
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.ingressController.podLabels | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# 4. L'API ne reçoit que Traefik, sur son port (ses sorties : politique 5).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "acrm.selector" (dict "root" $ "component" "api") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $np.ingressController.namespace }} }
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.ingressController.podLabels | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 3000 }
+---
+# 5. Sorties de l'API et du worker (même code, mêmes besoins). Le worker ne reçoit
+#    rien (sa sonde de santé vient du nœud) : la politique 1 suffit pour son entrée.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-backend-egress
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}] }
+      - { key: app.kubernetes.io/component, operator: In, values: [api, worker] }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { cnpg.io/cluster: {{ $db | quote }} }
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "acrm.selector" (dict "root" $ "component" "redis") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 6379 }
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "acrm.selector" (dict "root" $ "component" "mailpit") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 1025 }
+    {{- if $np.externalHttps.enabled }}
+    # Internet en HTTPS seulement, SAUF les plages privées : le cluster (10.42/10.43),
+    # le réseau privé OVH et l'adresse de métadonnées du cloud (169.254.169.254)
+    # restent fermés. Une API compromise ne peut donc pas sonder le réseau interne.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml $np.externalHttps.except | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 443 }
+    {{- end }}
+---
+# 6. Jobs de migration et de données de démo : la base, rien d'autre.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-jobs-egress
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}] }
+      - { key: app.kubernetes.io/component, operator: In, values: [migrate, seed] }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { cnpg.io/cluster: {{ $db | quote }} }
+      ports:
+        - { protocol: TCP, port: 5432 }
+{{- if .Values.redis.enabled }}
+---
+# 7. Redis ne reçoit que l'API et le worker.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-redis
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "acrm.selector" (dict "root" $ "component" "redis") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}] }
+              - { key: app.kubernetes.io/component, operator: In, values: [api, worker] }
+      ports:
+        - { protocol: TCP, port: 6379 }
+{{- end }}
+{{- if .Values.mailpit.enabled }}
+---
+# 8. Mailpit reçoit les e-mails de l'API et du worker (SMTP 1025). Son interface web
+#    (8025) ne s'ouvre que par `kubectl port-forward`, qui ne passe pas par le réseau
+#    des pods : aucune règle à ouvrir pour cela.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-mailpit
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "acrm.selector" (dict "root" $ "component" "mailpit") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}] }
+              - { key: app.kubernetes.io/component, operator: In, values: [api, worker] }
+      ports:
+        - { protocol: TCP, port: 1025 }
+{{- end }}
+{{- if .Values.postgres.enabled }}
+---
+# 9. La base (pods créés par CloudNativePG, étiquetés cnpg.io/cluster=<nom>, y compris
+#    ses Jobs d'initialisation) :
+#    - reçoit les applications (5432) et l'opérateur (5432 + 8000, son « instance manager »
+#      qui pilote PostgreSQL) ;
+#    - envoie vers l'API Kubernetes : l'instance y lit sa définition et y écrit son état.
+#      Dans k3s, l'API est servie par le nœud lui-même sur le port 6443 (le Service
+#      « kubernetes » 10.43.0.1:443 est traduit vers <IP du nœud>:6443 avant le filtrage).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-database
+  labels:
+    {{- include "acrm.labels" (dict "root" $ "component" "network") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { cnpg.io/cluster: {{ $db | quote }} }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}] }
+              - { key: app.kubernetes.io/component, operator: In, values: [api, worker, migrate, seed] }
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $np.cnpgOperator.namespace }} }
+      ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 8000 }
+  egress:
+    - to:
+        - ipBlock: { cidr: {{ $np.apiServer.cidr }} }
+      ports:
+        {{- range $np.apiServer.ports }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+{{- end }}
+{{- end }}
