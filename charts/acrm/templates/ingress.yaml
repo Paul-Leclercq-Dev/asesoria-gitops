@@ -1,6 +1,6 @@
 # Un seul hôte pour le front ET l'API (cookie de session SameSite=Strict, ADR-017
-# du CRM) : /v1 → API, tout le reste → front. Traefik (fourni par k3s) reçoit le
-# HTTPS de Cloudflare sur le 443 avec le certificat ci-dessous.
+# du CRM) : /v1 et /.well-known → API, tout le reste → front. Traefik (fourni
+# par k3s) reçoit le HTTPS de Cloudflare sur le 443 avec le certificat ci-dessous.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -20,6 +20,13 @@ spec:
       http:
         paths:
           - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-api
+                port: { name: http }
+          # Découverte OAuth des assistants IA (ADR-018 du CRM).
+          - path: /.well-known
             pathType: Prefix
             backend:
               service:
